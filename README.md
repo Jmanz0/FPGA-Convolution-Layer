@@ -3,9 +3,9 @@
 Total MACS: 14058616   
 Total Active MACS: 11535975  
 Total Active PE Array MACS: 13271040 \* .81 \= 10749543  
-Redundant MAC usage (calculating wasted values): 81% of the PE array
+Actual MAC usage: 81% of the PE array
 
-**Analysis**: As the 6th PE array only is ⅓ efficient we waste quite a few macs. For improvements we would need to be able to use partial PE arrays.  
+**Analysis**: As the 6th PE array only is ⅓ efficient we waste quite a few macs. For improvements we would need to be able to use partial PE arrays, employing a more flexible scheduling algorithm.  
 
 **Architecture:**  
 This implementation is of the 2nd convolution (the 3rd layer)  
