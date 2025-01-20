@@ -1,0 +1,122 @@
+"""
+1) For each array, we connect the data to each one and only read when needed. (MUST BE ONLY THE LEFT AND BOTTOM)
+2) For the start, we connect each start together in paralell
+
+This means the structure of the scheduler is this:
+# broadcast across left/bottom edges (56 bits)
+data_port1
+data_port2
+data_port3
+data_port4
+data_port5
+data_port6
+
+# broadcast across left edges (35 bits)
+filter_port1
+filter_port2
+filter_port3
+filter_port4
+filter_port5
+
+#broadcast across left edges (1 bit)
+start_port1
+start_port2
+start_port3
+start_port4
+start_port5
+"""
+
+from pe_array import PEArray
+class Scheduler:
+    def __init__(self, input_bram, filter_bram):
+        self.input_bram = input_bram
+        self.filter_bram = filter_bram
+        self.aggregator = None
+        self.write_ram = None
+        # broadcast across left/bottom edges (56 bits)
+        self.data_port1 = [0] * 8 
+        self.data_port2 = [0] * 8
+        self.data_port3 = [0] * 8
+        self.data_port4 = [0] * 8
+        self.data_port5 = [0] * 8
+
+        # broadcast across left edges (35 bits)
+        self.filter_port = [0] * 5
+
+        #Propagated to the left-top of each PE array
+        self.start_port= [0]
+
+        self.pe_cluster = [PEArray(3, self.start_port, self.data_port1, self.filter_port), 
+                         PEArray(3, self.start_port, self.data_port2, self.filter_port), 
+                         PEArray(3, self.start_port, self.data_port3, self.filter_port), 
+                         PEArray(3, self.start_port, self.data_port4, self.filter_port),
+                         PEArray(3, self.start_port, self.data_port4, self.filter_port),
+                         PEArray(3, self.start_port, self.data_port4, self.filter_port)]
+    
+
+    def process_step(self):
+        for pe_array in self.pe_cluster:
+            pe_array.process()
+        self.aggregator.process()
+        self.write_ram.process()
+
+    def run(self):
+        # FILTER (32)
+        base_ifm_bram_addr = 0
+        base_filter_bram_addr = 0
+
+        num_layers = 32
+        num_rows = 18 # Need to add padding vertically
+        num_filters = 64
+        tile_size = 5
+        window_size = 3
+
+        for output_layer in range(num_filters):
+            for layer_offset in range(num_layers): # Go through each layer (each with a new filter)
+                for row in range(num_rows): # Go through each row in the IFS
+                    
+                    # Deal with initial propogation of data per new layer
+                    # Load left edge data
+                    if row < window_size:
+                        i = row
+                        if i < window_size:
+                            filter_offset = i
+                            self.filter_port = self.filter_bram.read(base_filter_bram_addr + layer_offset * 3 + filter_offset, 32)
+                        if row == 0:
+                            ifs_row = [0] * 18
+                        else:
+                            row_offset = i # Represents going through each [filter section]
+                            ifs_row = [0] + self.input_bram.read(base_ifm_bram_addr + layer_offset * 16 + row_offset, 128) + [0]
+
+                        self.data_port1 = ifs_row[i:i+5]
+                        self.data_port2 = ifs_row[i+3:i+8]
+                        self.data_port3 = ifs_row[i+6:i+11]
+                        self.data_port4 = ifs_row[i+9:i+14]
+                        self.data_port5 = ifs_row[i+12:i+17]
+                        self.data_part6 = ifs_row[i+13:i+18] # wastes 18 out of the 27 macs
+                        self.process_step()
+                    # Deal with upwards propogation of data
+                    if row >= window_size:
+
+                        # need to wait 3 cycles for mac + accum
+                        if row >= window_size + 2:
+                            for i in range(3):
+                                self.process_step()
+                            pass
+
+                        row_offset = row + i
+                        if row == num_rows - tile_size - 1:
+                            ifs_row = [0] * 18
+                        ifs_row = [0] + self.input_bram.read(base_ifm_bram_addr + layer_offset * 16 + row_offset, 128) + [0]
+
+                        self.data_port1 = ifs_row[i:i+5]
+                        self.data_port2 = ifs_row[i+3:i+8]
+                        self.data_port3 = ifs_row[i+6:i+11]
+                        self.data_port4 = ifs_row[i+9:i+14]
+                        self.data_port5 = ifs_row[i+12:i+17]
+                        self.data_part6 = ifs_row[i+13:i+18]
+                        self.process_step()
+
+            base_filter_bram_addr += 3*32 # We do not reuse filters for each layer
+
+
